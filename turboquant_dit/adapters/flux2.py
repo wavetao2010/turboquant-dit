@@ -35,7 +35,9 @@ class Flux2Adapter(QuantAdapter):
                 return "attention"
 
         # Diffusers-style FLUX.2 naming.
-        if "mlp" in targets and ".transformer_blocks." in lname:
+        dotted = f".{lname}."
+
+        if "mlp" in targets and ".transformer_blocks." in dotted:
             mlp_markers = (
                 ".ff_context.",
                 ".ff.",
@@ -44,7 +46,7 @@ class Flux2Adapter(QuantAdapter):
             )
             if any(marker in lname for marker in mlp_markers):
                 return "mlp"
-        if "single" in targets and ".single_transformer_blocks." in lname:
+        if "single" in targets and ".single_transformer_blocks." in dotted:
             single_markers = (
                 ".proj_mlp",
                 ".proj_out",

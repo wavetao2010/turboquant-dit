@@ -105,3 +105,89 @@ Recommended comparison table:
 | Cache-DiT + TurboQuant-DiT | 4 | yes | optional | measure | measure | measure | measure |
 
 This repository intentionally does not vendor Cache-DiT or require it at import time.
+
+## Benchmark Script
+
+This repository includes a Diffusers-based TP benchmark:
+
+```bash
+torchrun --nproc_per_node=2 examples/flux2_cache_dit_tp_benchmark.py \
+  --model-path /path/to/FLUX.2-dev \
+  --case baseline \
+  --steps 8 \
+  --height 512 \
+  --width 512 \
+  --parallel-text-encoder \
+  --output-dir ./outputs/cache_dit_tp2
+
+torchrun --nproc_per_node=2 examples/flux2_cache_dit_tp_benchmark.py \
+  --model-path /path/to/FLUX.2-dev \
+  --case both \
+  --steps 8 \
+  --height 512 \
+  --width 512 \
+  --parallel-text-encoder \
+  --cache-dir ./quant_cache/cache_dit_tp2 \
+  --output-dir ./outputs/cache_dit_tp2
+```
+
+For TP4, change `--nproc_per_node=2` to `--nproc_per_node=4` and use a separate cache directory,
+for example `./quant_cache/cache_dit_tp4`.
+
+Supported cases:
+
+| Case | Transformer Quant | Text Encoder Quant |
+|---|---:|---:|
+| `baseline` | no | no |
+| `transformer` | yes | no |
+| `both` | yes | yes |
+
+The script intentionally uses:
+
+```python
+from diffusers import Flux2Pipeline
+```
+
+It does not use the official reference `src.flux2.flux2pipeline.Flux2Pipeline`.
+
+## Measured Diffusers + Cache-DiT TP Results
+
+The following results were measured with Diffusers `Flux2Pipeline`, Cache-DiT TP, text encoder TP
+enabled, 512x512 text-to-image, 8 denoising steps, bf16 weights, seed 42, and a single measured run
+per case. They are included as reproducible reference points, not universal speed claims.
+
+| World Size | Case | Transformer Quant | Text Encoder Quant | Replaced Modules | Latency | Load/Init | Peak Allocated per Rank | Delta vs Baseline |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| TP2 | baseline | no | no | 0 | 3.493s | 80.833s | 57009.7MB | - |
+| TP2 | transformer | yes | no | 80 | 5.199s | 74.023s | 48386.2MB | -8623.5MB |
+| TP2 | both | yes | yes | 200 | 10.325s | 92.995s | 39095.2MB | -17914.5MB |
+| TP4 | baseline | no | no | 0 | 2.516s | 70.076s | 31419.4MB | - |
+| TP4 | transformer | yes | no | 80 | 7.284s | 94.731s | 26908.5MB | -4510.9MB |
+| TP4 | both | yes | yes | 200 | 7.005s | 88.966s | 22278.2MB | -9141.2MB |
+
+Interpretation:
+
+- Transformer quantization reduces per-rank memory on top of Cache-DiT TP sharding.
+- Text encoder quantization gives substantial additional memory reduction when the text encoder is
+  kept under TP, but it can add latency with the current conservative dense/dequantized backend.
+- Current backends optimize memory footprint and startup cacheability, not INT8 Tensor Core GEMM
+  throughput. Faster weight-only GEMM remains future work.
+- Cache hits are rank/world-size specific. TP2 and TP4 caches must be stored separately.
+
+Measured replacement counts:
+
+| Component | Method | Target | Replaced Modules |
+|---|---|---|---:|
+| FLUX.2 transformer | `turboquant_full` | `mlp,single` | 80 |
+| Mistral3 text encoder | `groupwise_int8` | `text_mlp` | 120 |
+
+If Cache-DiT's Mistral planner expects `text_encoder.language_model` but your installed
+Transformers version exposes it as `text_encoder.model.language_model`, the benchmark script can
+apply a compatibility alias:
+
+```bash
+--patch-mistral3-language-model-alias
+```
+
+This is only a local compatibility shim for older/newer Transformers layout differences. If your
+runtime already exposes `language_model`, the flag is not needed.

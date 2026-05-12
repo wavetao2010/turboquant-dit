@@ -5,6 +5,7 @@ from typing import Any, Iterable
 
 import torch
 import torch.nn as nn
+from torch.distributed.tensor import DTensor, Partial, Shard
 
 from .adapters import get_adapter
 from .cache import cache_path, load_cache, save_cache
@@ -35,6 +36,99 @@ def _get_parent_and_child(root: nn.Module, name: str) -> tuple[nn.Module, str]:
     for part in parts[:-1]:
         parent = parent[int(part)] if part.isdigit() else getattr(parent, part)
     return parent, parts[-1]
+
+
+def _local_tensor(tensor: torch.Tensor | None) -> torch.Tensor | None:
+    if isinstance(tensor, DTensor):
+        return tensor.to_local()
+    return tensor
+
+
+def _dtensor_weight_shard_dim(module: nn.Linear) -> int | None:
+    weight = getattr(module, "weight", None)
+    if not isinstance(weight, DTensor):
+        return None
+    ndim = int(weight.to_local().ndim)
+    for placement in weight.placements:
+        if placement.is_shard():
+            dim = int(placement.dim)
+            return dim if dim >= 0 else dim + ndim
+    return None
+
+
+def _dtensor_device_mesh(module: nn.Linear):
+    weight = getattr(module, "weight", None)
+    return weight.device_mesh if isinstance(weight, DTensor) else None
+
+
+def _tp_local_output_placement(module: nn.Linear):
+    shard_dim = _dtensor_weight_shard_dim(module)
+    if shard_dim == 0:
+        return Shard(-1)
+    if shard_dim == 1:
+        return Partial()
+    return None
+
+
+def _zero_nonzero_rank_rowwise_bias(module: nn.Linear, local: nn.Linear) -> None:
+    if local.bias is None or _dtensor_weight_shard_dim(module) != 1:
+        return
+    mesh = _dtensor_device_mesh(module)
+    if mesh is None:
+        return
+    try:
+        local_rank = int(mesh.get_local_rank())
+    except TypeError:
+        local_rank = int(mesh.get_local_rank(mesh_dim=0))
+    if local_rank != 0:
+        local.bias.data.zero_()
+
+
+def _register_tp_output_adapter(module: nn.Linear, quant_module: nn.Module) -> None:
+    mesh = _dtensor_device_mesh(module)
+    placement = _tp_local_output_placement(module)
+    if mesh is None or placement is None:
+        return
+
+    def _wrap_local_output(_mod, _inputs, outputs):
+        if isinstance(outputs, DTensor):
+            return outputs
+        if isinstance(outputs, torch.Tensor):
+            return DTensor.from_local(outputs, mesh, (placement,), run_check=False)
+        return outputs
+
+    quant_module.register_forward_hook(_wrap_local_output, prepend=True)
+
+
+def _make_local_linear(module: nn.Linear) -> nn.Linear:
+    weight = _local_tensor(module.weight)
+    if weight is None:
+        raise RuntimeError("linear module has no weight")
+    weight = weight.detach()
+    bias = _local_tensor(module.bias)
+    bias = bias.detach() if bias is not None else None
+    local = nn.Linear(
+        int(weight.shape[1]),
+        int(weight.shape[0]),
+        bias=bias is not None,
+        device=weight.device,
+        dtype=weight.dtype,
+    )
+    local.weight.data.copy_(weight)
+    local.weight.requires_grad_(False)
+    if bias is not None:
+        local.bias.data.copy_(bias)
+        local.bias.requires_grad_(False)
+    return local
+
+
+def _copy_module_hooks(src: nn.Module, dst: nn.Module) -> None:
+    # PyTorch tensor parallelism attaches DTensor input/output hooks to Linear modules.
+    dst._forward_pre_hooks.update(src._forward_pre_hooks)
+    dst._forward_pre_hooks_with_kwargs.update(src._forward_pre_hooks_with_kwargs)
+    dst._forward_hooks.update(src._forward_hooks)
+    dst._forward_hooks_with_kwargs.update(src._forward_hooks_with_kwargs)
+    dst._forward_hooks_always_called.update(src._forward_hooks_always_called)
 
 
 def _module_cache_state(module: nn.Module, method: str, kind: str) -> dict[str, Any]:
@@ -151,6 +245,7 @@ def quantize_model(
     allow_shards: bool = False,
     cache_state: dict[str, Any] | None = None,
     return_cache_state: bool = False,
+    preserve_hooks: bool = False,
 ) -> QuantSummary | tuple[QuantSummary, dict[str, Any]]:
     quant_adapter = get_adapter(adapter)
     adapter_name = quant_adapter.name
@@ -221,9 +316,15 @@ def quantize_model(
             if cached_states:
                 if module_name not in cached_states:
                     raise KeyError(f"quant cache missing module {module_name}")
-                device = module.weight.device
+                local_weight = _local_tensor(module.weight)
+                if local_weight is None:
+                    raise RuntimeError(f"module {module_name} has no local weight")
+                device = local_weight.device
                 quant_module = _cached_quant_module(cached_states[module_name], device)
             else:
+                quant_source = _make_local_linear(module) if allow_shards else module
+                if allow_shards and isinstance(quant_source, nn.Linear):
+                    _zero_nonzero_rank_rowwise_bias(module, quant_source)
                 common = dict(
                     group_size=int(group_size),
                     dequant_cache_enabled=bool(opts.get("cache_enabled", False)),
@@ -236,12 +337,12 @@ def quantize_model(
                     module_kind=kind,
                 )
                 if method == "groupwise_int8":
-                    quant_module = GroupWiseInt8Linear(module, **common)
+                    quant_module = GroupWiseInt8Linear(quant_source, **common)
                 elif method == "turboquant_mse":
-                    quant_module = TurboQuantMSELinear(module, module_name=module_name, rotation_seed=rotation_seed, **common)
+                    quant_module = TurboQuantMSELinear(quant_source, module_name=module_name, rotation_seed=rotation_seed, **common)
                 elif method == "turboquant_full":
                     quant_module = TurboQuantFullLinear(
-                        module,
+                        quant_source,
                         module_name=module_name,
                         rotation_seed=rotation_seed,
                         scale_opt=scale_opt,
@@ -255,7 +356,7 @@ def quantize_model(
                 else:
                     raise ValueError("method must be one of: groupwise_int8, turboquant_mse, turboquant_full")
                 quant_module.module_name = module_name
-                quant_module = quant_module.to(module.weight.device)
+                quant_module = quant_module.to(quant_source.weight.device)
                 if bool(getattr(quant_module, "dequant_cache_enabled", False)):
                     cache_dtype = quant_module._cache_dtype() if hasattr(quant_module, "_cache_dtype") else torch.bfloat16
                     quant_module._get_weight(cache_dtype)
@@ -264,6 +365,9 @@ def quantize_model(
                     dense_cached_by_kind[kind] = dense_cached_by_kind.get(kind, 0) + 1
                 if return_cache_state or cache_dir:
                     new_states[module_name] = _module_cache_state(quant_module, method, kind)
+            if preserve_hooks:
+                _copy_module_hooks(module, quant_module)
+                _register_tp_output_adapter(module, quant_module)
             setattr(parent, child_name, quant_module)
             replaced += 1
             by_kind[kind] = by_kind.get(kind, 0) + 1

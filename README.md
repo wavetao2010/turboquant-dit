@@ -155,6 +155,34 @@ Single GPU and multi-GPU answer different questions:
 
 See [docs/CACHE_DIT_INTEGRATION.md](docs/CACHE_DIT_INTEGRATION.md).
 
+Diffusers + Cache-DiT TP benchmark:
+
+```bash
+torchrun --nproc_per_node=2 examples/flux2_cache_dit_tp_benchmark.py \
+  --model-path /path/to/FLUX.2-dev \
+  --case both \
+  --steps 8 \
+  --height 512 \
+  --width 512 \
+  --parallel-text-encoder \
+  --cache-dir ./quant_cache/cache_dit_tp2 \
+  --output-dir ./outputs/cache_dit_tp2
+```
+
+Use `--nproc_per_node=4` for TP4. The script uses `diffusers.Flux2Pipeline`; it does not import the
+official reference `src.flux2.flux2pipeline.Flux2Pipeline`.
+
+Measured 512x512, 8-step Diffusers + Cache-DiT TP reference results:
+
+| Case | TP2 Peak / Latency | TP4 Peak / Latency |
+|---|---:|---:|
+| Cache-DiT baseline | 57009.7MB / 3.493s | 31419.4MB / 2.516s |
+| Transformer quant | 48386.2MB / 5.199s | 26908.5MB / 7.284s |
+| Transformer + text encoder quant | 39095.2MB / 10.325s | 22278.2MB / 7.005s |
+
+See [docs/CACHE_DIT_INTEGRATION.md](docs/CACHE_DIT_INTEGRATION.md) for setup details, cache rules,
+and interpretation.
+
 ## Measured Results
 
 Reference FLUX.2 experiments are documented in [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md). Current public results use the official FLUX.2 reference pipeline, text-to-image mode, single-GPU CPU/GPU offload, 512x512, 28 steps, seed 42, and cache-hit quantized states:
