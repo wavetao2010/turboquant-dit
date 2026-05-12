@@ -1,0 +1,58 @@
+{
+  "case": "transformer_text_quant",
+  "quant_transformer": true,
+  "quant_text_encoder": true,
+  "prompt": "A cinematic photo of a glass greenhouse in a snowy mountain valley at sunrise, warm interior lights, detailed plants, soft volumetric light, ultra realistic.",
+  "width": 512,
+  "height": 512,
+  "steps": 28,
+  "guidance": 2.5,
+  "seed": 42,
+  "load_sec": 16.143497724086046,
+  "quant_sec": 27.65317665785551,
+  "load_quant_sec": 43.7917017173022,
+  "latency_sec": 93.93814451433718,
+  "image": "transformer_text_quant.png",
+  "quant_summaries": {
+    "text_encoder": {
+      "enabled": true,
+      "adapter": "mistral3",
+      "method": "groupwise_int8",
+      "targets": [
+        "text_mlp"
+      ],
+      "replaced": 120,
+      "by_kind": {
+        "text_mlp": 120
+      },
+      "skipped": 0,
+      "errors": [],
+      "cache_hit": true,
+      "dense_cached": 0,
+      "dense_cached_by_kind": {}
+    },
+    "transformer": {
+      "enabled": true,
+      "adapter": "flux2",
+      "method": "turboquant_full",
+      "targets": [
+        "mlp",
+        "single"
+      ],
+      "replaced": 128,
+      "by_kind": {
+        "mlp": 80,
+        "single": 48
+      },
+      "skipped": 0,
+      "errors": [],
+      "cache_hit": true,
+      "dense_cached": 0,
+      "dense_cached_by_kind": {}
+    }
+  },
+  "load_quant_peak_allocated_mb": 65928.5361328125,
+  "load_quant_peak_reserved_mb": 65942.0,
+  "forward_peak_allocated_mb": 38994.099609375,
+  "forward_peak_reserved_mb": 65308.0
+}

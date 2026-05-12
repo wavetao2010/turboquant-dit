@@ -1,0 +1,21 @@
+{
+  "case": "baseline",
+  "quant_transformer": false,
+  "quant_text_encoder": false,
+  "prompt": "A cinematic photo of a glass greenhouse in a snowy mountain valley at sunrise, warm interior lights, detailed plants, soft volumetric light, ultra realistic.",
+  "width": 512,
+  "height": 512,
+  "steps": 28,
+  "guidance": 2.5,
+  "seed": 42,
+  "load_sec": 15.721428148448467,
+  "quant_sec": 0.0004243161529302597,
+  "load_quant_sec": 15.721472963690758,
+  "latency_sec": 112.48385730944574,
+  "image": "baseline.png",
+  "quant_summaries": {},
+  "load_quant_peak_allocated_mb": 46128.5361328125,
+  "load_quant_peak_reserved_mb": 46142.0,
+  "forward_peak_allocated_mb": 62834.4755859375,
+  "forward_peak_reserved_mb": 63376.0
+}

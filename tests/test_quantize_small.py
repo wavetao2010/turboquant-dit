@@ -17,6 +17,33 @@ class TinyDiTBlock(nn.Module):
         return self.attn(x) + self.mlp(x)
 
 
+class TinyFlux2ReferenceNames(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.double_blocks = nn.ModuleList(
+            [
+                nn.ModuleDict(
+                    {
+                        "img_mlp": nn.Sequential(nn.Linear(16, 32, bias=False), nn.GELU(), nn.Linear(32, 16, bias=False)),
+                        "txt_mlp": nn.Sequential(nn.Linear(16, 32, bias=False), nn.GELU(), nn.Linear(32, 16, bias=False)),
+                    }
+                )
+                for _ in range(2)
+            ]
+        )
+        self.single_blocks = nn.ModuleList(
+            [
+                nn.ModuleDict(
+                    {
+                        "linear1": nn.Linear(16, 64, bias=False),
+                        "linear2": nn.Linear(64, 16, bias=False),
+                    }
+                )
+                for _ in range(2)
+            ]
+        )
+
+
 def test_generic_mlp_quantize_smoke():
     model = TinyDiTBlock().eval()
     summary = quantize_model(model, adapter="generic", method="groupwise_int8", targets=["mlp"], backend="eager")
@@ -26,6 +53,19 @@ def test_generic_mlp_quantize_smoke():
     x = torch.randn(2, 3, 16)
     y = model(x)
     assert y.shape == (2, 3, 16)
+
+
+def test_flux2_reference_name_classification():
+    model = TinyFlux2ReferenceNames().eval()
+    summary = quantize_model(
+        model,
+        adapter="flux2",
+        method="groupwise_int8",
+        targets=["mlp", "single"],
+        backend="eager",
+    )
+    assert summary.replaced == 12
+    assert summary.by_kind == {"mlp": 10, "single": 2}
 
 
 def test_cache_roundtrip(tmp_path):

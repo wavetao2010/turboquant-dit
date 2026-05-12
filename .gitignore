@@ -8,3 +8,7 @@ dist/
 build/
 *.egg-info/
 quant_cache/
+assets/flux2_t2i_single_gpu_smoke/
+assets/flux2_t2i_single_gpu_smoke_v2/
+assets/flux2_t2i_single_gpu_512_8step/
+assets/flux2_t2i_single_gpu_resident_smoke/

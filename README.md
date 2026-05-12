@@ -2,13 +2,13 @@
 
 Standalone W8A16 weight-only quantization utilities for FLUX.2 and DiT-style diffusion transformers.
 
-This repository is an open-source extraction candidate from a production FLUX.2 optimization project. The initial target is conservative:
+The initial target is conservative and reproducible:
 
 - First-class FLUX.2 transformer support.
 - Optional Mistral3 text encoder MLP compression.
 - Adapter-based extension points for other DiT architectures.
 - Disk quantization cache for fast startup after the first quantization.
-- Standalone PyTorch/Diffusers usage, with optional integration notes for external frameworks such as Cache-DiT.
+- Standalone PyTorch usage, with optional integration notes for external frameworks such as Cache-DiT.
 
 ## Current Scope
 
@@ -64,31 +64,109 @@ summary = quantize_model(
 )
 ```
 
+## Diffusers FLUX.2 Example
+
+For most users, the Diffusers example is the simpler entry point:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+python examples/flux2_diffusers_quant.py \
+  --model-path /path/to/FLUX.2-dev \
+  --device cuda:0 \
+  --case both \
+  --width 512 \
+  --height 512 \
+  --steps 28 \
+  --cache-dir ./quant_cache/diffusers_flux2 \
+  --output-dir ./outputs/diffusers_flux2 \
+  --cpu-offload
+```
+
+Cases:
+
+| Case | Transformer Quant | Mistral3 Text Encoder Quant |
+|---|---:|---:|
+| `baseline` | no | no |
+| `transformer` | yes | no |
+| `text` | no | yes |
+| `both` | yes | yes |
+
+## Official FLUX.2 Reference Pipeline Benchmark
+
+This repository includes a runnable single-GPU text-to-image benchmark that loads real FLUX.2 and
+Mistral3 weights through the official FLUX.2 reference pipeline. By default it uses CPU/GPU offload,
+matching the reference pipeline's low-memory single-GPU path. It also has a resident smoke mode that
+initializes with offload, applies quantization, then keeps the quantized transformer and text encoder
+on one GPU during forward. This script is mainly used for the measured public results below.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+PYTHONPATH=/path/to/turboquant-dit:/path/to/flux2 \
+python examples/flux2_t2i_single_gpu_benchmark.py \
+  --flux2-root /path/to/flux2 \
+  --model-path /path/to/FLUX.2-dev \
+  --device cuda:0 \
+  --case all \
+  --width 512 \
+  --height 512 \
+  --steps 28 \
+  --seed 42 \
+  --output-dir assets/flux2_t2i_single_gpu_512_28step \
+  --cache-dir /path/to/quant_cache
+```
+
+Resident single-GPU smoke:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+PYTHONPATH=/path/to/turboquant-dit:/path/to/flux2 \
+python examples/flux2_t2i_single_gpu_benchmark.py \
+  --flux2-root /path/to/flux2 \
+  --model-path /path/to/FLUX.2-dev \
+  --device cuda:0 \
+  --case both \
+  --width 512 \
+  --height 512 \
+  --steps 1 \
+  --seed 42 \
+  --output-dir assets/flux2_t2i_single_gpu_resident_smoke \
+  --cache-dir /path/to/quant_cache \
+  --no-offload-after-quant
+```
+
 ## Cache-DiT Integration
 
-Cache-DiT is optional. If used, apply TurboQuant-DiT after external parallelization:
+Cache-DiT is optional and is not required by this package. For multi-GPU serving, apply
+TurboQuant-DiT after external parallelization so the plugin quantizes the final local Linear shards:
 
 ```text
 load pipeline
 fuse LoRA if needed
-apply Cache-DiT / TP
+apply Cache-DiT / TP / context parallelism
 quantize transformer and/or text encoder
 ```
+
+Single GPU and multi-GPU answer different questions:
+
+- Single GPU resident smoke shows that quantized FLUX.2 + Mistral3 can fit on one 80GB GPU when the
+  unquantized baseline does not.
+- TP2/TP4 runs should report per-rank memory. TurboQuant-DiT reduces each rank's local Linear weight
+  storage on top of Cache-DiT sharding/cache acceleration.
 
 See [docs/CACHE_DIT_INTEGRATION.md](docs/CACHE_DIT_INTEGRATION.md).
 
 ## Measured Results
 
-Reference FLUX.2 experiments are documented in [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md). Highlights from measured runs:
+Reference FLUX.2 experiments are documented in [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md). Current public results use the official FLUX.2 reference pipeline, text-to-image mode, single-GPU CPU/GPU offload, 512x512, 28 steps, seed 42, and cache-hit quantized states:
 
-| Scenario | Memory Result | Latency Result | Quality Signal |
-|---|---:|---:|---:|
-| Official 28-step baseline vs `turboquant_full_attn_mlp` | -13.9GB allocated peak | -5.21% latency | PSNR 37.36dB |
-| Official 28-step current-best quant vs `attn+mlp+single` low-memory path | -15.1GB allocated peak | +1.94% latency | PSNR 38.35dB |
-| TP2 2048 try-on, add Mistral3 text encoder quant | -9.3GB/card allocated peak | +0.717s over 8 steps | image output validated |
-| TP4 2048 try-on LoRA cache-hit quant vs baseline | -25.3GB rank0 allocated peak | +6.433s over 8 steps | PSNR 24.518dB |
+| Case | Replaced Modules | Forward Latency | Forward Allocated Peak | Output |
+|---|---:|---:|---:|---|
+| baseline | 0 | 112.484s | 62834.5MB | [image](assets/flux2_t2i_single_gpu_512_28step/baseline.png) |
+| transformer quant | 128 | 112.947s | 46499.7MB | [image](assets/flux2_t2i_single_gpu_512_28step/transformer_quant.png) |
+| text encoder quant | 120 | 94.196s | 62834.4MB | [image](assets/flux2_t2i_single_gpu_512_28step/text_encoder_quant.png) |
+| transformer + text encoder quant | 248 | 93.938s | 38994.1MB | [image](assets/flux2_t2i_single_gpu_512_28step/transformer_text_quant.png) |
 
-These numbers are workload-specific. They are included to make the project reproducible and falsifiable, not to claim universal speedups.
+These numbers are workload-specific single-run measurements. The text-encoder-only case does not reduce the reported denoise forward peak because the unquantized transformer still dominates that metric; in the combined case, adding Mistral3 quantization on top of transformer quantization reduces forward allocated peak by another 7505.6MB in this run. The table is included to make the project reproducible and falsifiable, not to claim universal speedups.
 
 ## Status
 

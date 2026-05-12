@@ -41,3 +41,12 @@ quantize_model(
 ```
 
 Cache files are rank/world-size specific. Do not reuse TP2 cache files for TP4.
+
+For TP2/TP4 reports, compare per-rank peaks rather than only global process memory. Cache-DiT and
+TurboQuant-DiT optimize different parts of the pipeline:
+
+- Cache-DiT / TP reduces or shards execution pressure and can accelerate attention/cache-heavy work.
+- TurboQuant-DiT reduces local Linear weight storage after sharding.
+- Text encoder quantization is most visible when the text encoder is resident or when transformer
+  memory has already been reduced enough that text encoder memory is no longer hidden by the
+  transformer peak.

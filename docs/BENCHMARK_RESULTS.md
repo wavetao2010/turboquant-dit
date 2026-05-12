@@ -1,172 +1,185 @@
 # Benchmark Results
 
-This page records measured results from the FLUX.2 extraction work that motivated TurboQuant-DiT. Treat these numbers as reference points, not universal claims: latency and memory depend on model weights, resolution, sequence length, parallelism, cache state, PyTorch/CUDA versions, and deployment code.
+This page records reproducible public-facing FLUX.2 text-to-image checks for TurboQuant-DiT.
+The goal is to make memory, latency, cache state, and output images inspectable without depending
+on private deployment code.
 
-## Key Takeaways
+Current public results use the official FLUX.2 reference pipeline with single-GPU CPU/GPU offload.
+Cache-DiT and tensor-parallel serving are optional integrations and are intentionally not part of
+this baseline table.
 
-- On the official FLUX.2-style single-GPU benchmark, `turboquant_full` on transformer MLP paths reduced allocated peak memory by about **13.9GB** while slightly improving latency in that run.
-- Adding the 48 single-block large Linear projections reduced allocated peak memory by a further **15.1GB** versus the previous quantized reference, with about **1.9%** latency increase.
-- In TP2 2048 try-on deployment tests, adding Mistral3 text encoder MLP quantization saved about **9.3GB/card** over transformer quant + text encoder TP, with about **0.7s** extra 8-step latency.
-- First-run quantization can be expensive. Compare cache-hit runs separately from cache-miss runs.
-- Current public backend is memory-oriented. It stores W8A16 weights and runs safe dense/dequantized paths; it is not yet a production INT8 Tensor Core GEMM backend.
+## Current Scope
 
-## Official FLUX.2-Style Single-GPU Benchmark
+The default backend is memory-oriented W8A16:
 
-Source: internal migration notes from `scripts/29_benchmark_wote_turbo_serial.sh`, 28 steps.
+- weights are stored as int8 plus scales;
+- execution uses the conservative cached-dense path;
+- this is not yet a true INT8 Tensor Core weight-only GEMM backend.
 
-### Baseline vs Transformer MLP Quant
+The validated public adapter targets are:
 
-Configuration:
+- FLUX.2 transformer: `adapter="flux2"`, `method="turboquant_full"`, `targets=["mlp", "single"]`;
+- Mistral3 text encoder: `adapter="mistral3"`, `method="groupwise_int8"`, `targets=["text_mlp"]`.
 
-- Baseline: no TurboQuant module replacement.
-- Quantized: `turboquant_full_attn_mlp + cached_dense bf16 lowp`.
-- Steps: 28.
+## Single-GPU FLUX.2 Text-to-Image Benchmark
 
-| Path | Latency Mean | Max Allocated | Max Reserved |
-|---|---:|---:|---:|
-| baseline | 708.386s | 69984.0MB | 78900.0MB |
-| `turboquant_full_attn_mlp + cached_dense bf16 lowp` | 671.468s | 56080.9MB | 69098.0MB |
+This benchmark verifies that the public example loads real FLUX.2 and Mistral3 weights, runs actual
+text-to-image inference, saves images, and records memory metrics. It uses CPU/GPU offload to make
+single-GPU execution possible for the full reference pipeline.
 
-Delta versus baseline:
+Important measurement scope:
 
-| Metric | Delta |
-|---|---:|
-| latency | -36.918s (-5.21%) |
-| allocated peak | -13903.1MB (-19.87%) |
-| reserved peak | -9802.0MB (-12.42%) |
+- With `offload=True`, the reported forward peak is the active GPU peak during pipeline execution,
+  not the sum of all FLUX.2 and Mistral3 weights resident on GPU at the same time.
+- The official reference pipeline keeps Mistral3 on GPU for text encoding, then moves it to CPU
+  before moving the FLUX.2 transformer to GPU.
+- Use `--no-offload-after-quant` to initialize safely with offload, apply quantization, then keep
+  the quantized transformer and text encoder resident on one GPU during forward.
 
-Image difference, baseline sample vs quant sample:
+Command shape:
 
-| MAE | RMS | PSNR |
-|---:|---:|---:|
-| 0.923 / 255 | 3.457 / 255 | 37.36dB |
-
-### Low-Memory Transformer MLP + Single-Block Quant
-
-Configuration:
-
-- Reference: current best `attn+mlp cached_dense`.
-- Low-memory: `attn+mlp+single cached_dense`.
-- Steps: 28.
-- `single` adds the 48 large Linear projections in FLUX.2 single transformer blocks.
-
-| Path | Steps | Latency Mean | Allocated Peak | Reserved Peak |
-|---|---:|---:|---:|---:|
-| current best `attn+mlp cached_dense` | 28 | 671.468s | 56080.9MB | 69098.0MB |
-| low-memory `attn+mlp+single cached_dense` | 28 | 684.510s | 41020.1MB | 55972.0MB |
-
-Delta versus current best:
-
-| Metric | Delta |
-|---|---:|
-| latency | +13.042s (+1.94%) |
-| allocated peak | -15060.9MB (-26.86%) |
-| reserved peak | -13126.0MB (-19.00%) |
-
-Image difference, current best 28-step sample vs low-memory 28-step sample:
-
-| MAE | RMS | PSNR |
-|---:|---:|---:|
-| 0.909 / 255 | 3.084 / 255 | 38.35dB |
-
-4-step clean sanity check:
-
-| Comparison | MAE | RMS | PSNR |
-|---|---:|---:|---:|
-| 4-step cached vs 4-step single clean | 1.120 / 255 | 2.431 / 255 | 40.41dB |
-
-## 2048 Try-On Deployment Benchmarks
-
-These tests used the online try-on deployment path, Cache-DiT tensor parallelism, 2048 output height, LoRA fused before quantization, and disk quant cache. They are included to show deployment feasibility, not to claim universal latency.
-
-### TP2, Transformer Quant With Text Encoder TP
-
-Configuration:
-
-- GPUs: 2 cards, TP2.
-- Resolution: 1536x2048.
-- Steps: 8.
-- Transformer: `turboquant_full`, targets `mlp,single`, replaced 128 Linear modules.
-- Text encoder TP: enabled.
-- Transformer cache: hit.
-
-| Case | Load/Init | 8-Step Latency | Rank0 Alloc | Rank1 Alloc | Reserved Rank0/Rank1 | Transformer Cache | Text Cache |
-|---|---:|---:|---:|---:|---:|---|---|
-| Transformer Quant + Text Encoder TP, no Text Quant | 326.626s | 39.225s | 51185.60MB | 51185.06MB | 65556 / 66204MB | hit | off |
-| Transformer Quant + Text Encoder TP + Text Encoder Quant | 349.285s | 39.942s | 41886.70MB | 41886.65MB | 56526 / 57390MB | hit | hit |
-
-Delta from adding Mistral3 text encoder quantization:
-
-| Metric | Delta |
-|---|---:|
-| 8-step latency | +0.717s |
-| rank0 allocated peak | -9298.90MB |
-| rank1 allocated peak | -9298.41MB |
-| rank0 reserved peak | -9030MB |
-| rank1 reserved peak | -8814MB |
-| text encoder Linear modules replaced | 120 |
-
-Output images from the measured runs:
-
-```text
-/mnt/sda/flux2_bench/transformer_quant_texttp_2048_8step_cachehit_20260511/20260511_150915/w8a16_low_memory/w8a16_low_memory_run01.png
-/mnt/sda/flux2_bench/transformer_texttp_textquant_2048_8step_cachehit_20260511/20260511_155729/w8a16_low_memory/w8a16_low_memory_run01.png
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+PYTHONPATH=/path/to/turboquant-dit:/path/to/flux2 \
+python examples/flux2_t2i_single_gpu_benchmark.py \
+  --flux2-root /path/to/flux2 \
+  --model-path /path/to/FLUX.2-dev \
+  --device cuda:0 \
+  --case all \
+  --width 512 \
+  --height 512 \
+  --steps 28 \
+  --seed 42 \
+  --output-dir assets/flux2_t2i_single_gpu_512_28step \
+  --cache-dir /path/to/quant_cache
 ```
 
-### TP4, 2048 Try-On, LoRA Fused, Cache Hit
+Run configuration:
 
-Configuration:
+| Field | Value |
+|---|---|
+| pipeline | official FLUX.2 reference `Flux2Pipeline` |
+| mode | text-to-image |
+| offload | enabled |
+| resolution | 512x512 |
+| steps | 28 |
+| seed | 42 |
+| transformer cache | hit for quantized transformer runs |
+| text encoder cache | hit for quantized text encoder runs |
 
-- GPUs: 2,3,4,5, TP4.
-- Inputs: mask 1536x2048, source 688x1024.
-- Output: 2048x1536.
-- Steps: 8.
-- LoRA fused before Cache-DiT TP and quantization.
-- Quantized case: transformer `turboquant_full` on `mlp,single` plus text encoder `groupwise_int8`.
-- Transformer cache: hit.
-- Text cache: hit.
+Results:
 
-| Case | Load/Init | Latency | Rank0 Alloc | Rank0 Reserved | Transformer Cache | Text Cache |
-|---|---:|---:|---:|---:|---|---|
-| baseline | 336.300s | 21.492s | 70759.2MB | 79844.0MB | false | false |
-| quant cached_dense MLP+single + text groupwise | 280.016s | 27.924s | 45498.8MB | 60594.0MB | true | true |
+| Case | Transformer Quant | Text Encoder Quant | Replaced Modules | Cache Hit | Forward Latency | Forward Allocated Peak | Image |
+|---|---:|---:|---:|---|---:|---:|---|
+| baseline | no | no | 0 | - | 112.484s | 62834.5MB | [baseline.png](../assets/flux2_t2i_single_gpu_512_28step/baseline.png) |
+| transformer_quant | yes | no | 128 | transformer | 112.947s | 46499.7MB | [transformer_quant.png](../assets/flux2_t2i_single_gpu_512_28step/transformer_quant.png) |
+| text_encoder_quant | no | yes | 120 | text encoder | 94.196s | 62834.4MB | [text_encoder_quant.png](../assets/flux2_t2i_single_gpu_512_28step/text_encoder_quant.png) |
+| transformer_text_quant | yes | yes | 248 | transformer + text encoder | 93.938s | 38994.1MB | [transformer_text_quant.png](../assets/flux2_t2i_single_gpu_512_28step/transformer_text_quant.png) |
 
-Delta:
+Module replacement details:
 
-| Metric | Delta |
+| Component | Method | Targets | Replaced |
+|---|---|---|---:|
+| FLUX.2 transformer | `turboquant_full` | `mlp`, `single` | 128 (`mlp`: 80, `single`: 48) |
+| Mistral3 text encoder | `groupwise_int8` | `text_mlp` | 120 |
+
+Forward allocated peak comparisons:
+
+| Comparison | Delta |
 |---|---:|
-| load/init | -56.284s |
-| latency | +6.433s |
-| rank0 allocated saved | 25260.4MB |
-| rank0 reserved saved | 19250.0MB |
+| transformer_quant vs baseline | -16334.8MB |
+| text_encoder_quant vs baseline | -0.1MB |
+| transformer_text_quant vs baseline | -23840.4MB |
+| transformer_text_quant vs transformer_quant | -7505.6MB |
 
-Pixel difference for this try-on pair:
+Same-seed pixel diagnostics versus the baseline image:
 
-| PSNR | MSE | MAE | Max Abs |
-|---:|---:|---:|---:|
-| 24.518dB | 229.770 | 4.248 | 187.0 |
+| Case | MAE / 255 | RMSE / 255 | PSNR | Max Abs |
+|---|---:|---:|---:|---:|
+| transformer_quant | 0.483 | 1.108 | 47.24dB | 47 |
+| text_encoder_quant | 0.544 | 1.393 | 45.25dB | 53 |
+| transformer_text_quant | 0.619 | 1.288 | 45.94dB | 60 |
 
-The lower PSNR in this LoRA try-on scenario should be interpreted carefully: image-to-image try-on outputs can diverge more visibly from small representation changes than pure same-seed linear-level tests. Use visual review and task metrics in addition to PSNR for deployment decisions.
+Interpretation:
 
-## Text Encoder Standalone Quantization
+- Transformer quantization is the main driver for denoise-stage memory reduction.
+- Text encoder quantization alone does not reduce the reported denoise forward peak because the unquantized transformer remains the dominant allocation in that case.
+- The text encoder benefit becomes visible in the combined case: adding Mistral3 quantization on top of transformer quantization reduces forward allocated peak by another 7505.6MB in this run.
+- The combined case has the lowest observed forward allocated peak in this offload benchmark.
+- Pixel diagnostics are included as sanity checks. They are not a substitute for prompt-suite visual evaluation.
+- This is a single run on one environment. The four cases were run concurrently on separate single visible GPUs, so latency should be treated as a reproducibility anchor rather than a stable speed claim.
 
-Mistral3 text encoder tests measured prompt embedding runtime and embedding difference. Earlier runs without correct module matching replaced zero modules and are intentionally omitted here.
+Raw metrics and images are stored under:
 
-Validated QJL experiment:
+```text
+assets/flux2_t2i_single_gpu_512_28step/
+```
 
-| Case | Replaced | Latency Mean | Allocated Peak | Reserved Peak | Cosine | Mean Abs | RMSE | Relative L2 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `text_mlp_w8a16`, QJL rank 16 | 120 | 0.743s | 73584.8MB | 73864.0MB | 0.990690 | 0.011562 | 0.024728 | 0.136516 |
+## Reproducing
 
-This QJL configuration improved embedding fidelity but used substantially more memory and latency than the deployment-oriented text encoder compression path. For the TP2 deployment benchmark above, the recommended text encoder setting is `groupwise_int8` on `text_mlp`.
+Use the benchmark script directly:
 
-## Backend Experiments That Were Not Adopted
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+PYTHONPATH=/path/to/turboquant-dit:/path/to/flux2 \
+python examples/flux2_t2i_single_gpu_benchmark.py \
+  --flux2-root /path/to/flux2 \
+  --model-path /path/to/FLUX.2-dev \
+  --device cuda:0 \
+  --case all \
+  --width 512 \
+  --height 512 \
+  --steps 28 \
+  --seed 42 \
+  --output-dir assets/flux2_t2i_single_gpu_512_28step \
+  --cache-dir /path/to/quant_cache
+```
 
-Several experimental fused paths were tested during development:
+Resident single-GPU smoke:
 
-- Triton fused dequant matmul: correct, but end-to-end latency was unstable and often worse than dense cached execution.
-- CUDA naive one-thread-per-output prototype: correct but far too slow.
-- CUTLASS dequant-to-dense tile sweep: did not beat cached dense for the measured FLUX.2 shapes.
-- Experimental `weight_only_wmma`: saved some memory but was much slower and had worse image difference in the tested prototype.
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+PYTHONPATH=/path/to/turboquant-dit:/path/to/flux2 \
+python examples/flux2_t2i_single_gpu_benchmark.py \
+  --flux2-root /path/to/flux2 \
+  --model-path /path/to/FLUX.2-dev \
+  --device cuda:0 \
+  --case both \
+  --width 512 \
+  --height 512 \
+  --steps 1 \
+  --seed 42 \
+  --output-dir assets/flux2_t2i_single_gpu_resident_smoke \
+  --cache-dir /path/to/quant_cache \
+  --no-offload-after-quant
+```
 
-Current recommendation is to keep the public default backend conservative and pursue true weight-only GEMM as a future backend, not as the initial open-source default.
+On an A800 80GB, this resident smoke completed for `transformer_text_quant` with
+`offload_during_forward=false`, `forward_peak_allocated_mb=66205.1`, and
+`forward_peak_reserved_mb=69872.0`. The corresponding unquantized baseline failed while moving the
+full transformer to the same GPU with a CUDA OOM. This is a feasibility smoke, not the main quality
+benchmark.
+
+The script records:
+
+- `load_sec`;
+- `quant_sec`;
+- `load_quant_sec`;
+- `latency_sec`;
+- `load_quant_peak_allocated_mb`;
+- `forward_peak_allocated_mb`;
+- per-component quantization summaries;
+- per-component cache hit state.
+
+For publication-quality comparisons, prefer cache-hit steady-state runs and report cache-miss startup
+cost separately.
+
+## Notes
+
+Do not compare cache-miss quantization startup directly with cache-hit baseline inference. First-run
+quantization can be expensive because quantized module state is created and serialized to disk. The
+steady-state path should use `cache_hit=true`.
+
+Latency and memory depend on resolution, number of steps, PyTorch/CUDA versions, visible GPU count,
+model variant, and offload policy. Treat these numbers as a reproducibility anchor, not a universal
+performance claim.
