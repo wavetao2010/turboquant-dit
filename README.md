@@ -77,6 +77,19 @@ quantize transformer and/or text encoder
 
 See [docs/CACHE_DIT_INTEGRATION.md](docs/CACHE_DIT_INTEGRATION.md).
 
+## Measured Results
+
+Reference FLUX.2 experiments are documented in [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md). Highlights from measured runs:
+
+| Scenario | Memory Result | Latency Result | Quality Signal |
+|---|---:|---:|---:|
+| Official 28-step baseline vs `turboquant_full_attn_mlp` | -13.9GB allocated peak | -5.21% latency | PSNR 37.36dB |
+| Official 28-step current-best quant vs `attn+mlp+single` low-memory path | -15.1GB allocated peak | +1.94% latency | PSNR 38.35dB |
+| TP2 2048 try-on, add Mistral3 text encoder quant | -9.3GB/card allocated peak | +0.717s over 8 steps | image output validated |
+| TP4 2048 try-on LoRA cache-hit quant vs baseline | -25.3GB rank0 allocated peak | +6.433s over 8 steps | PSNR 24.518dB |
+
+These numbers are workload-specific. They are included to make the project reproducible and falsifiable, not to claim universal speedups.
+
 ## Status
 
 This package now has standalone PyTorch quantized Linear modules and no runtime dependency on the local FLUX2 source tree. Current backends are conservative dense/dequantized execution paths; optimized INT8 GEMM backends are future work.

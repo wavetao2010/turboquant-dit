@@ -45,4 +45,4 @@ Transformer quant + text encoder TP + text encoder quant:
   max alloc: ~41.9GB/card
 ```
 
-These numbers are workload-specific and should be remeasured for each deployment.
+More complete single-GPU, TP2, TP4, memory, latency, PSNR, and text-embedding measurements are recorded in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md). These numbers are workload-specific and should be remeasured for each deployment.
