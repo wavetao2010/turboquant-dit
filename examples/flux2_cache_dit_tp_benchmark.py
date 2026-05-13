@@ -44,6 +44,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--output-dir", default="./outputs/flux2_cache_dit_tp")
     parser.add_argument("--cache-dir", default="./quant_cache/flux2_cache_dit_tp")
+    parser.add_argument("--cache-repo-id", default=None, help="Optional Hugging Face repo id for prebuilt quantization caches.")
+    parser.add_argument("--cache-variant", default=None, help="Optional subdirectory prefix inside the prebuilt cache repo.")
+    parser.add_argument("--cache-revision", default=None)
+    parser.add_argument("--auto-download-cache", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--cache-download-required", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--torch-dtype", default="bf16", choices=["bf16", "fp16", "fp32"])
     parser.add_argument("--save-image", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--cache-dit", action=argparse.BooleanOptionalAction, default=True)
@@ -189,6 +194,11 @@ def quantize_after_parallel(pipe: Flux2Pipeline, args: argparse.Namespace, rank:
             cache_dir=args.cache_dir,
             cache_namespace=f"cache_dit_tp{world_size}_flux2_transformer",
             cache_case=f"{args.transformer_method}_transformer",
+            cache_repo_id=args.cache_repo_id,
+            cache_variant=args.cache_variant,
+            cache_revision=args.cache_revision,
+            auto_download_cache=args.auto_download_cache,
+            cache_download_required=args.cache_download_required,
             rank=rank,
             world_size=world_size,
             allow_shards=allow_shards,
@@ -208,6 +218,11 @@ def quantize_after_parallel(pipe: Flux2Pipeline, args: argparse.Namespace, rank:
             cache_dir=args.cache_dir,
             cache_namespace=f"cache_dit_tp{world_size}_mistral3_text_encoder",
             cache_case=f"{args.text_method}_text_mlp",
+            cache_repo_id=args.cache_repo_id,
+            cache_variant=args.cache_variant,
+            cache_revision=args.cache_revision,
+            auto_download_cache=args.auto_download_cache,
+            cache_download_required=args.cache_download_required,
             rank=rank,
             world_size=world_size,
             allow_shards=allow_shards,

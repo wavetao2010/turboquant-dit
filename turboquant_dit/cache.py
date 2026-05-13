@@ -14,7 +14,11 @@ def stable_digest(payload: dict[str, Any]) -> str:
 
 
 def cache_path(cache_dir: str | Path, *, namespace: str, case: str, payload: dict[str, Any], rank: int = 0) -> Path:
-    return Path(cache_dir) / namespace / f"{case}_{stable_digest(payload)}_rank{rank:02d}.pt"
+    return Path(cache_dir) / cache_relative_path(namespace=namespace, case=case, payload=payload, rank=rank)
+
+
+def cache_relative_path(*, namespace: str, case: str, payload: dict[str, Any], rank: int = 0) -> Path:
+    return Path(namespace) / f"{case}_{stable_digest(payload)}_rank{rank:02d}.pt"
 
 
 def load_cache(path: str | Path, expected_payload: dict[str, Any], *, mmap: bool = False) -> tuple[dict[str, Any] | None, dict[str, Any]]:

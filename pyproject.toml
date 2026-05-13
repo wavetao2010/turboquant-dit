@@ -29,6 +29,14 @@ classifiers = [
 Homepage = "https://github.com/wavetao2010/turboquant-dit"
 Repository = "https://github.com/wavetao2010/turboquant-dit"
 
+[project.optional-dependencies]
+hub = [
+  "huggingface_hub>=0.20"
+]
+
+[project.scripts]
+turboquant-dit-download-cache = "turboquant_dit.download_cache:main"
+
 [tool.setuptools.packages.find]
 include = ["turboquant_dit*"]
 

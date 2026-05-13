@@ -8,6 +8,7 @@ The initial target is conservative and reproducible:
 - Optional Mistral3 text encoder MLP compression.
 - Adapter-based extension points for other DiT architectures.
 - Disk quantization cache for fast startup after the first quantization.
+- Optional prebuilt cache download from Hugging Face Hub or an internal mirror.
 - Standalone PyTorch usage, with optional integration notes for external frameworks such as Cache-DiT.
 
 ## Current Scope
@@ -47,6 +48,10 @@ summary = quantize_model(
         "cache_enabled": False,
     },
     cache_dir="./quant_cache",
+    # Optional: download a matching prebuilt cache before local quantization.
+    # cache_repo_id="wavetao2010/turboquant-dit-flux2-cache",
+    # cache_variant="flux2-dev-diffusers",
+    # auto_download_cache=True,
 )
 
 print(summary)
@@ -63,6 +68,9 @@ summary = quantize_model(
     cache_dir="./quant_cache",
 )
 ```
+
+Prebuilt cache download is optional. Cache files are tied to model revision, LoRA fusion state,
+quantization config, world size, and rank. See [docs/PREBUILT_CACHE.md](docs/PREBUILT_CACHE.md).
 
 ## Diffusers FLUX.2 Example
 

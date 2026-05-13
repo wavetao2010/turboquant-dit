@@ -9,6 +9,7 @@ from torch.distributed.tensor import DTensor, Partial, Shard
 
 from .adapters import get_adapter
 from .cache import cache_path, load_cache, save_cache
+from .hub_cache import download_prebuilt_cache_file
 from .quant_linear import GroupWiseInt8Linear, TurboQuantFullLinear, TurboQuantMSELinear, release_qjl_residual_buffers_if_merged
 
 
@@ -23,6 +24,7 @@ class QuantSummary:
     skipped: int
     errors: list[str]
     cache_hit: bool = False
+    cache_download: dict[str, Any] | None = None
     dense_cached: int = 0
     dense_cached_by_kind: dict[str, int] | None = None
 
@@ -240,6 +242,14 @@ def quantize_model(
     cache_dir: str | None = None,
     cache_namespace: str | None = None,
     cache_case: str = "w8a16",
+    cache_repo_id: str | None = None,
+    cache_variant: str | None = None,
+    cache_revision: str | None = None,
+    cache_token: str | bool | None = None,
+    auto_download_cache: bool = False,
+    cache_download_required: bool = False,
+    cache_download_local_files_only: bool = False,
+    validate_cache_manifest: bool = True,
     rank: int = 0,
     world_size: int = 1,
     allow_shards: bool = False,
@@ -286,10 +296,37 @@ def quantize_model(
         world_size=world_size,
     )
     cache_info: dict[str, Any] = {"enabled": bool(cache_dir), "hit": False, "path": None}
+    cache_download_info: dict[str, Any] | None = None
     if cache_dir and cache_state is None:
         namespace = cache_namespace or adapter_name
         path = cache_path(cache_dir, namespace=namespace, case=cache_case, payload=payload, rank=rank)
         cache_state, cache_info = load_cache(path, payload, mmap=adapter_name == "mistral3")
+        if cache_state is None and auto_download_cache and cache_repo_id:
+            cache_download = download_prebuilt_cache_file(
+                repo_id=cache_repo_id,
+                local_path=path,
+                namespace=namespace,
+                case=cache_case,
+                payload=payload,
+                rank=rank,
+                variant=cache_variant,
+                revision=cache_revision,
+                token=cache_token,
+                local_files_only=cache_download_local_files_only,
+                required=cache_download_required,
+                validate_manifest=validate_cache_manifest,
+            )
+            cache_download_info = cache_download.to_dict()
+            if cache_download.hit:
+                cache_state, cache_info = load_cache(path, payload, mmap=adapter_name == "mistral3")
+                if cache_state is None and cache_download_required:
+                    raise RuntimeError(f"downloaded prebuilt cache is stale or incompatible: {path}")
+        elif auto_download_cache and not cache_repo_id:
+            cache_download_info = {
+                "enabled": False,
+                "attempted": False,
+                "error": "auto_download_cache=True requires cache_repo_id",
+            }
 
     cached_states = dict((cache_state or {}).get("states") or {})
     new_states: dict[str, dict[str, Any]] = {}
@@ -387,6 +424,7 @@ def quantize_model(
         skipped=skipped,
         errors=errors,
         cache_hit=bool(cached_states),
+        cache_download=cache_download_info,
         dense_cached=dense_cached,
         dense_cached_by_kind=dense_cached_by_kind,
     )

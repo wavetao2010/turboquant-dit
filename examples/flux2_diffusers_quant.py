@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--guidance-scale", type=float, default=4.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cache-dir", default="./quant_cache/diffusers_flux2")
+    parser.add_argument("--cache-repo-id", default=None, help="Optional Hugging Face repo id for prebuilt quantization caches.")
+    parser.add_argument("--cache-variant", default=None, help="Optional subdirectory prefix inside the prebuilt cache repo.")
+    parser.add_argument("--cache-revision", default=None)
+    parser.add_argument("--auto-download-cache", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--cache-download-required", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--output-dir", default="./outputs/diffusers_flux2")
     parser.add_argument("--torch-dtype", default="bf16", choices=["bf16", "fp16", "fp32"])
     parser.add_argument("--cpu-offload", action="store_true", help="Use Diffusers model CPU offload.")
@@ -92,6 +97,11 @@ def apply_quantization(pipe, args: argparse.Namespace) -> dict[str, Any]:
             cache_dir=args.cache_dir,
             cache_namespace="diffusers_flux2_transformer",
             cache_case="turboquant_full_transformer",
+            cache_repo_id=args.cache_repo_id,
+            cache_variant=args.cache_variant,
+            cache_revision=args.cache_revision,
+            auto_download_cache=args.auto_download_cache,
+            cache_download_required=args.cache_download_required,
             strict=True,
         ).to_dict()
 
@@ -111,6 +121,11 @@ def apply_quantization(pipe, args: argparse.Namespace) -> dict[str, Any]:
             cache_dir=args.cache_dir,
             cache_namespace="diffusers_flux2_text_encoder",
             cache_case="groupwise_int8_text_mlp",
+            cache_repo_id=args.cache_repo_id,
+            cache_variant=args.cache_variant,
+            cache_revision=args.cache_revision,
+            auto_download_cache=args.auto_download_cache,
+            cache_download_required=args.cache_download_required,
             strict=True,
         ).to_dict()
     return summaries

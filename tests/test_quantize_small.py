@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 
 from turboquant_dit import QuantSummary, quantize_model
+from turboquant_dit.cache import cache_path
+from turboquant_dit.hub_cache import prebuilt_cache_filename
+from turboquant_dit.replace import _cache_payload
 from turboquant_dit.quant_linear import GroupWiseInt8Linear, TurboQuantFullLinear, TurboQuantMSELinear
 
 
@@ -93,6 +96,72 @@ def test_cache_roundtrip(tmp_path):
     assert isinstance(summary2, QuantSummary)
     assert summary2.cache_hit is True
     assert summary2.replaced == 2
+    x = torch.randn(2, 3, 16)
+    y = model2(x)
+    assert y.shape == (2, 3, 16)
+
+
+def test_prebuilt_cache_download_from_local_hub_repo(tmp_path):
+    cache_source = tmp_path / "source_cache"
+    cache_target = tmp_path / "target_cache"
+    repo = tmp_path / "hub_repo"
+    model = TinyDiTBlock().eval()
+    summary = quantize_model(
+        model,
+        adapter="generic",
+        method="groupwise_int8",
+        targets=["mlp"],
+        backend="eager",
+        cache_dir=cache_source,
+        cache_namespace="tiny",
+        cache_case="groupwise",
+    )
+    assert summary.cache_hit is False
+
+    payload = _cache_payload(
+        adapter="generic",
+        method="groupwise_int8",
+        targets=["mlp"],
+        group_size=128,
+        backend="eager",
+        backend_fallback="eager",
+        fused_paths=["mlp"],
+        backend_opts={
+            "mode": "cached_dense",
+            "cache_dtype": "bf16",
+            "force_fp32": False,
+            "compute_dtype": "input",
+            "cache_enabled": False,
+        },
+        strict=True,
+        rank=0,
+        world_size=1,
+    )
+    src_path = cache_path(cache_source, namespace="tiny", case="groupwise", payload=payload, rank=0)
+    filename = prebuilt_cache_filename(namespace="tiny", case="groupwise", payload=payload, rank=0, variant="variant-a")
+    dst_path = repo / filename
+    dst_path.parent.mkdir(parents=True)
+    dst_path.write_bytes(src_path.read_bytes())
+
+    model2 = TinyDiTBlock().eval()
+    summary2 = quantize_model(
+        model2,
+        adapter="generic",
+        method="groupwise_int8",
+        targets=["mlp"],
+        backend="eager",
+        cache_dir=cache_target,
+        cache_namespace="tiny",
+        cache_case="groupwise",
+        cache_repo_id=str(repo),
+        cache_variant="variant-a",
+        auto_download_cache=True,
+        cache_download_local_files_only=True,
+    )
+    assert summary2.cache_hit is True
+    assert summary2.cache_download is not None
+    assert summary2.cache_download["hit"] is True
+    assert cache_path(cache_target, namespace="tiny", case="groupwise", payload=payload, rank=0).exists()
     x = torch.randn(2, 3, 16)
     y = model2(x)
     assert y.shape == (2, 3, 16)
