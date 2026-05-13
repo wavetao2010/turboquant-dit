@@ -1,0 +1,45 @@
+{
+  "case": "baseline",
+  "pipeline": "diffusers.Flux2Pipeline",
+  "cache_dit": true,
+  "parallel_type": "tp",
+  "parallel_text_encoder": true,
+  "world_size": 2,
+  "steps": 28,
+  "height": 512,
+  "width": 512,
+  "guidance_scale": 4.0,
+  "seed": 42,
+  "load_sec": 71.28874770924449,
+  "latencies_sec": [
+    7.091720957309008
+  ],
+  "latency_sec_mean": 7.091720957309008,
+  "rank_memory": [
+    {
+      "rank": 0,
+      "local_rank": 0,
+      "device": "cuda:0",
+      "max_memory_allocated_mb": 57009.69384765625,
+      "max_memory_reserved_mb": 57980.0
+    },
+    {
+      "rank": 1,
+      "local_rank": 1,
+      "device": "cuda:1",
+      "max_memory_allocated_mb": 57009.69384765625,
+      "max_memory_reserved_mb": 57932.0
+    }
+  ],
+  "quant_summaries": {},
+  "mistral3_language_model_alias_patch": {
+    "enabled": true,
+    "applied": true,
+    "text_encoder_class": "Mistral3ForConditionalGeneration",
+    "alias_source": "text_encoder.model.language_model",
+    "language_model_class": "MistralModel"
+  },
+  "image_paths": [
+    "baseline_run01.png"
+  ]
+}

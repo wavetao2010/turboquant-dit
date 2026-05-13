@@ -161,24 +161,24 @@ Diffusers + Cache-DiT TP benchmark:
 torchrun --nproc_per_node=2 examples/flux2_cache_dit_tp_benchmark.py \
   --model-path /path/to/FLUX.2-dev \
   --case both \
-  --steps 8 \
+  --steps 28 \
   --height 512 \
   --width 512 \
   --parallel-text-encoder \
   --cache-dir ./quant_cache/cache_dit_tp2 \
-  --output-dir ./outputs/cache_dit_tp2
+  --output-dir assets/flux2_cache_dit_tp_512_28step
 ```
 
 Use `--nproc_per_node=4` for TP4. The script uses `diffusers.Flux2Pipeline`; it does not import the
 official reference `src.flux2.flux2pipeline.Flux2Pipeline`.
 
-Measured 512x512, 8-step Diffusers + Cache-DiT TP reference results:
+Measured 512x512, 28-step Diffusers + Cache-DiT TP reference results:
 
-| Case | TP2 Peak / Latency | TP4 Peak / Latency |
-|---|---:|---:|
-| Cache-DiT baseline | 57009.7MB / 3.493s | 31419.4MB / 2.516s |
-| Transformer quant | 48386.2MB / 5.199s | 26908.5MB / 7.284s |
-| Transformer + text encoder quant | 39095.2MB / 10.325s | 22278.2MB / 7.005s |
+| Case | TP2 Peak / Latency | TP4 Peak / Latency | Outputs |
+|---|---:|---:|---|
+| Cache-DiT baseline | 57009.7MB / 7.092s | 31419.4MB / 5.607s | [TP2](assets/flux2_cache_dit_tp_512_28step/tp2_baseline.png), [TP4](assets/flux2_cache_dit_tp_512_28step/tp4_baseline.png) |
+| Transformer quant | 48386.2MB / 12.713s | 26908.5MB / 11.191s | [TP2](assets/flux2_cache_dit_tp_512_28step/tp2_transformer.png), [TP4](assets/flux2_cache_dit_tp_512_28step/tp4_transformer.png) |
+| Transformer + text encoder quant | 39096.2MB / 20.734s | 22278.1MB / 12.344s | [TP2](assets/flux2_cache_dit_tp_512_28step/tp2_both.png), [TP4](assets/flux2_cache_dit_tp_512_28step/tp4_both.png) |
 
 See [docs/CACHE_DIT_INTEGRATION.md](docs/CACHE_DIT_INTEGRATION.md) for setup details, cache rules,
 and interpretation.
