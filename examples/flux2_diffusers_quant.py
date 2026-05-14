@@ -39,7 +39,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--cache-dir", default="./quant_cache/diffusers_flux2")
     parser.add_argument("--cache-repo-id", default=None, help="Optional Hugging Face repo id for prebuilt quantization caches.")
+    parser.add_argument("--transformer-cache-repo-id", default=None, help="Optional prebuilt cache repo id for FLUX.2 transformer caches.")
+    parser.add_argument("--text-cache-repo-id", default=None, help="Optional prebuilt cache repo id for Mistral3 text encoder caches.")
     parser.add_argument("--cache-variant", default=None, help="Optional subdirectory prefix inside the prebuilt cache repo.")
+    parser.add_argument("--transformer-cache-variant", default=None, help="Optional variant for FLUX.2 transformer caches.")
+    parser.add_argument("--text-cache-variant", default=None, help="Optional variant for Mistral3 text encoder caches.")
     parser.add_argument("--cache-revision", default=None)
     parser.add_argument("--auto-download-cache", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--cache-download-required", action=argparse.BooleanOptionalAction, default=False)
@@ -48,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cpu-offload", action="store_true", help="Use Diffusers model CPU offload.")
     parser.add_argument("--transformer-targets", default="mlp,single")
     parser.add_argument("--text-targets", default="text_mlp")
+    parser.add_argument("--transformer-cache-namespace", default="flux2_transformer")
+    parser.add_argument("--text-cache-namespace", default="mistral3_text_encoder")
     parser.add_argument("--include-local-paths", action="store_true")
     return parser.parse_args()
 
@@ -82,6 +88,22 @@ def get_text_encoder(pipe):
     return None
 
 
+def cache_repo_id(args: argparse.Namespace, component: str) -> str | None:
+    if component == "transformer":
+        return args.transformer_cache_repo_id or args.cache_repo_id
+    if component == "text_encoder":
+        return args.text_cache_repo_id or args.cache_repo_id
+    raise ValueError(f"unknown cache component: {component}")
+
+
+def cache_variant(args: argparse.Namespace, component: str) -> str | None:
+    if component == "transformer":
+        return args.transformer_cache_variant or args.cache_variant
+    if component == "text_encoder":
+        return args.text_cache_variant or args.cache_variant
+    raise ValueError(f"unknown cache component: {component}")
+
+
 def apply_quantization(pipe, args: argparse.Namespace) -> dict[str, Any]:
     summaries: dict[str, Any] = {}
     if args.case in {"transformer", "both"}:
@@ -95,10 +117,10 @@ def apply_quantization(pipe, args: argparse.Namespace) -> dict[str, Any]:
             fused_paths=split_csv(args.transformer_targets),
             backend_opts=backend_opts(),
             cache_dir=args.cache_dir,
-            cache_namespace="diffusers_flux2_transformer",
+            cache_namespace=args.transformer_cache_namespace,
             cache_case="turboquant_full_transformer",
-            cache_repo_id=args.cache_repo_id,
-            cache_variant=args.cache_variant,
+            cache_repo_id=cache_repo_id(args, "transformer"),
+            cache_variant=cache_variant(args, "transformer"),
             cache_revision=args.cache_revision,
             auto_download_cache=args.auto_download_cache,
             cache_download_required=args.cache_download_required,
@@ -119,10 +141,10 @@ def apply_quantization(pipe, args: argparse.Namespace) -> dict[str, Any]:
             fused_paths=split_csv(args.text_targets),
             backend_opts=backend_opts(),
             cache_dir=args.cache_dir,
-            cache_namespace="diffusers_flux2_text_encoder",
+            cache_namespace=args.text_cache_namespace,
             cache_case="groupwise_int8_text_mlp",
-            cache_repo_id=args.cache_repo_id,
-            cache_variant=args.cache_variant,
+            cache_repo_id=cache_repo_id(args, "text_encoder"),
+            cache_variant=cache_variant(args, "text_encoder"),
             cache_revision=args.cache_revision,
             auto_download_cache=args.auto_download_cache,
             cache_download_required=args.cache_download_required,

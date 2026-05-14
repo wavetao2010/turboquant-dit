@@ -19,6 +19,12 @@ you plan to serve.
 The current public benchmark uses real FLUX.2 text-to-image inference through the official reference
 pipeline: 512x512, 28 steps, seed 42.
 
+Visual comparison:
+
+| Baseline | Transformer quant | Transformer + text encoder quant |
+|---|---|---|
+| <img src="../assets/flux2_t2i_single_gpu_512_28step/baseline.png" width="240"> | <img src="../assets/flux2_t2i_single_gpu_512_28step/transformer_quant.png" width="240"> | <img src="../assets/flux2_t2i_single_gpu_512_28step/transformer_text_quant.png" width="240"> |
+
 Generated outputs:
 
 | Case | Image |

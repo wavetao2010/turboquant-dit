@@ -45,7 +45,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="./outputs/flux2_cache_dit_tp")
     parser.add_argument("--cache-dir", default="./quant_cache/flux2_cache_dit_tp")
     parser.add_argument("--cache-repo-id", default=None, help="Optional Hugging Face repo id for prebuilt quantization caches.")
+    parser.add_argument("--transformer-cache-repo-id", default=None, help="Optional prebuilt cache repo id for FLUX.2 transformer caches.")
+    parser.add_argument("--text-cache-repo-id", default=None, help="Optional prebuilt cache repo id for Mistral3 text encoder caches.")
     parser.add_argument("--cache-variant", default=None, help="Optional subdirectory prefix inside the prebuilt cache repo.")
+    parser.add_argument("--transformer-cache-variant", default=None, help="Optional variant for FLUX.2 transformer caches.")
+    parser.add_argument("--text-cache-variant", default=None, help="Optional variant for Mistral3 text encoder caches.")
     parser.add_argument("--cache-revision", default=None)
     parser.add_argument("--auto-download-cache", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--cache-download-required", action=argparse.BooleanOptionalAction, default=False)
@@ -177,6 +181,22 @@ def enable_cache_dit(pipe: Flux2Pipeline, args: argparse.Namespace, world_size: 
     )
 
 
+def cache_repo_id(args: argparse.Namespace, component: str) -> str | None:
+    if component == "transformer":
+        return args.transformer_cache_repo_id or args.cache_repo_id
+    if component == "text_encoder":
+        return args.text_cache_repo_id or args.cache_repo_id
+    raise ValueError(f"unknown cache component: {component}")
+
+
+def cache_variant(args: argparse.Namespace, component: str) -> str | None:
+    if component == "transformer":
+        return args.transformer_cache_variant or args.cache_variant
+    if component == "text_encoder":
+        return args.text_cache_variant or args.cache_variant
+    raise ValueError(f"unknown cache component: {component}")
+
+
 def quantize_after_parallel(pipe: Flux2Pipeline, args: argparse.Namespace, rank: int, world_size: int) -> dict[str, Any]:
     summaries: dict[str, Any] = {}
     opts = backend_opts(args)
@@ -194,8 +214,8 @@ def quantize_after_parallel(pipe: Flux2Pipeline, args: argparse.Namespace, rank:
             cache_dir=args.cache_dir,
             cache_namespace=f"cache_dit_tp{world_size}_flux2_transformer",
             cache_case=f"{args.transformer_method}_transformer",
-            cache_repo_id=args.cache_repo_id,
-            cache_variant=args.cache_variant,
+            cache_repo_id=cache_repo_id(args, "transformer"),
+            cache_variant=cache_variant(args, "transformer"),
             cache_revision=args.cache_revision,
             auto_download_cache=args.auto_download_cache,
             cache_download_required=args.cache_download_required,
@@ -218,8 +238,8 @@ def quantize_after_parallel(pipe: Flux2Pipeline, args: argparse.Namespace, rank:
             cache_dir=args.cache_dir,
             cache_namespace=f"cache_dit_tp{world_size}_mistral3_text_encoder",
             cache_case=f"{args.text_method}_text_mlp",
-            cache_repo_id=args.cache_repo_id,
-            cache_variant=args.cache_variant,
+            cache_repo_id=cache_repo_id(args, "text_encoder"),
+            cache_variant=cache_variant(args, "text_encoder"),
             cache_revision=args.cache_revision,
             auto_download_cache=args.auto_download_cache,
             cache_download_required=args.cache_download_required,

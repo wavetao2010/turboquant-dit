@@ -7,6 +7,20 @@ available.
 Prebuilt caches are optional. If download is disabled or a matching file is not found,
 `quantize_model` falls back to the normal local cache/build path by default.
 
+## Public Cache Repos
+
+Current public single-GPU cache repos:
+
+| Component | Repo | Variant | Namespace | Cache Case |
+|---|---|---|---|---|
+| FLUX.2 transformer | `wavetao2010/turboquant-dit-flux2-dev-cache` | `flux2-dev-single-gpu` | `flux2_transformer` | `turboquant_full_transformer` |
+| Mistral3 text encoder | `wavetao2010/turboquant-dit-mistral3-cache` | `mistral3-single-gpu` | `mistral3_text_encoder` | `groupwise_int8_text_mlp` |
+
+The repos are separate intentionally. The FLUX.2 cache contains quantized/derived FLUX.2-dev
+weights and inherits the upstream FLUX.2-dev license constraints. The Mistral cache follows the
+upstream Mistral model license. Keep private LoRA-fused or proprietary checkpoints in private Hub
+repos.
+
 ## Important Constraints
 
 Cache files are not universal. They are tied to:
@@ -31,10 +45,10 @@ summary = quantize_model(
     targets=["mlp", "single"],
     backend="fused",
     cache_dir="./quant_cache",
-    cache_namespace="diffusers_flux2_transformer",
+    cache_namespace="flux2_transformer",
     cache_case="turboquant_full_transformer",
-    cache_repo_id="wavetao2010/turboquant-dit-flux2-cache",
-    cache_variant="flux2-dev-diffusers",
+    cache_repo_id="wavetao2010/turboquant-dit-flux2-dev-cache",
+    cache_variant="flux2-dev-single-gpu",
     auto_download_cache=True,
 )
 
@@ -57,10 +71,10 @@ Download one expected cache file:
 
 ```bash
 turboquant-dit-download-cache \
-  --repo-id wavetao2010/turboquant-dit-flux2-cache \
-  --variant flux2-dev-diffusers \
+  --repo-id wavetao2010/turboquant-dit-flux2-dev-cache \
+  --variant flux2-dev-single-gpu \
   --cache-dir ./quant_cache \
-  --cache-namespace diffusers_flux2_transformer \
+  --cache-namespace flux2_transformer \
   --cache-case turboquant_full_transformer \
   --adapter flux2 \
   --method turboquant_full \
@@ -75,10 +89,10 @@ Print the expected Hub filename without downloading:
 
 ```bash
 turboquant-dit-download-cache \
-  --repo-id wavetao2010/turboquant-dit-flux2-cache \
-  --variant flux2-dev-diffusers \
+  --repo-id wavetao2010/turboquant-dit-flux2-dev-cache \
+  --variant flux2-dev-single-gpu \
   --cache-dir ./quant_cache \
-  --cache-namespace diffusers_flux2_transformer \
+  --cache-namespace flux2_transformer \
   --cache-case turboquant_full_transformer \
   --adapter flux2 \
   --method turboquant_full \
@@ -94,10 +108,11 @@ A prebuilt cache repo should mirror the local cache relative path, optionally un
 
 ```text
 cache_manifest.json
-flux2-dev-diffusers/
-  diffusers_flux2_transformer/
+flux2-dev-single-gpu/
+  flux2_transformer/
     turboquant_full_transformer_<digest>_rank00.pt
-  diffusers_flux2_text_encoder/
+mistral3-single-gpu/
+  mistral3_text_encoder/
     groupwise_int8_text_mlp_<digest>_rank00.pt
 ```
 
@@ -122,9 +137,29 @@ python examples/flux2_diffusers_quant.py \
   --model-path /path/to/FLUX.2-dev \
   --case both \
   --cache-dir ./quant_cache/diffusers_flux2 \
-  --cache-repo-id wavetao2010/turboquant-dit-flux2-cache \
-  --cache-variant flux2-dev-diffusers \
+  --transformer-cache-repo-id wavetao2010/turboquant-dit-flux2-dev-cache \
+  --transformer-cache-variant flux2-dev-single-gpu \
+  --text-cache-repo-id wavetao2010/turboquant-dit-mistral3-cache \
+  --text-cache-variant mistral3-single-gpu \
   --auto-download-cache
+```
+
+Download the Mistral3 text encoder cache directly:
+
+```bash
+turboquant-dit-download-cache \
+  --repo-id wavetao2010/turboquant-dit-mistral3-cache \
+  --variant mistral3-single-gpu \
+  --cache-dir ./quant_cache \
+  --cache-namespace mistral3_text_encoder \
+  --cache-case groupwise_int8_text_mlp \
+  --adapter mistral3 \
+  --method groupwise_int8 \
+  --targets text_mlp \
+  --fused-paths text_mlp \
+  --backend fused \
+  --world-size 1 \
+  --rank 0
 ```
 
 Cache-DiT TP benchmark:
@@ -135,7 +170,37 @@ torchrun --nproc_per_node=2 examples/flux2_cache_dit_tp_benchmark.py \
   --case both \
   --steps 28 \
   --cache-dir ./quant_cache/cache_dit_tp2 \
-  --cache-repo-id wavetao2010/turboquant-dit-flux2-cache \
-  --cache-variant flux2-dev-cache-dit-tp2 \
+  --transformer-cache-repo-id wavetao2010/turboquant-dit-flux2-dev-cache \
+  --transformer-cache-variant flux2-dev-cache-dit-tp2 \
+  --text-cache-repo-id wavetao2010/turboquant-dit-mistral3-cache \
+  --text-cache-variant mistral3-cache-dit-tp2 \
   --auto-download-cache
 ```
+
+Only use TP variants after uploading matching rank-aware cache files. Single-GPU cache files cannot
+be reused for TP2/TP4 because the quantized states are tied to `world_size` and `rank`.
+
+## Uploading Your Own Cache
+
+For private LoRA-fused models or internal deployments, keep your prebuilt cache in your own private
+Hub repo or internal mirror. The helper below uploads a prepared folder while preserving the expected
+repo-relative layout:
+
+```bash
+python tools/upload_hf_cache_repo.py \
+  --folder /path/to/prepared_cache_folder \
+  --repo-id your-org/your-private-cache-repo \
+  --commit-message "Upload TurboQuant-DiT cache"
+```
+
+If your environment uses a Hugging Face endpoint mirror, set `HF_ENDPOINT`:
+
+```bash
+HF_ENDPOINT=http://your-hf-endpoint \
+python tools/upload_hf_cache_repo.py \
+  --folder /path/to/prepared_cache_folder \
+  --repo-id your-org/your-private-cache-repo
+```
+
+The helper prompts for an HF token unless `HF_TOKEN` is already set. Do not commit tokens or print
+them in logs.

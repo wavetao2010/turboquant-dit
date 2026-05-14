@@ -2,6 +2,26 @@
 
 Standalone W8A16 weight-only quantization utilities for FLUX.2 and DiT-style diffusion transformers.
 
+## What You Get
+
+TurboQuant-DiT is currently optimized for **memory reduction with reproducible image quality checks**.
+On the public FLUX.2 512x512, 28-step text-to-image benchmark below, transformer + text encoder
+quantization reduces the measured single-GPU forward allocated peak from **62.8GB to 39.0GB** while
+keeping the same-seed output close to baseline (**45.94dB PSNR**).
+
+| Baseline | Transformer quant | Transformer + text encoder quant |
+|---|---|---|
+| <img src="assets/flux2_t2i_single_gpu_512_28step/baseline.png" width="240"> | <img src="assets/flux2_t2i_single_gpu_512_28step/transformer_quant.png" width="240"> | <img src="assets/flux2_t2i_single_gpu_512_28step/transformer_text_quant.png" width="240"> |
+| 62.8GB peak | 46.5GB peak, 47.24dB PSNR | 39.0GB peak, 45.94dB PSNR |
+
+Prebuilt quantization caches are available on Hugging Face:
+
+- FLUX.2 transformer cache: [wavetao2010/turboquant-dit-flux2-dev-cache](https://huggingface.co/wavetao2010/turboquant-dit-flux2-dev-cache)
+- Mistral3 text encoder cache: [wavetao2010/turboquant-dit-mistral3-cache](https://huggingface.co/wavetao2010/turboquant-dit-mistral3-cache)
+
+The FLUX.2 cache contains quantized/derived FLUX.2-dev weights and inherits the FLUX.2-dev license
+constraints. Keep your usage aligned with the upstream model license.
+
 The initial target is conservative and reproducible:
 
 - First-class FLUX.2 transformer support.
@@ -49,8 +69,8 @@ summary = quantize_model(
     },
     cache_dir="./quant_cache",
     # Optional: download a matching prebuilt cache before local quantization.
-    # cache_repo_id="wavetao2010/turboquant-dit-flux2-cache",
-    # cache_variant="flux2-dev-diffusers",
+    # cache_repo_id="wavetao2010/turboquant-dit-flux2-dev-cache",
+    # cache_variant="flux2-dev-single-gpu",
     # auto_download_cache=True,
 )
 
@@ -66,6 +86,10 @@ summary = quantize_model(
     method="groupwise_int8",
     targets=["text_mlp"],
     cache_dir="./quant_cache",
+    # Optional prebuilt text encoder cache:
+    # cache_repo_id="wavetao2010/turboquant-dit-mistral3-cache",
+    # cache_variant="mistral3-single-gpu",
+    # auto_download_cache=True,
 )
 ```
 
@@ -86,6 +110,11 @@ python examples/flux2_diffusers_quant.py \
   --height 512 \
   --steps 28 \
   --cache-dir ./quant_cache/diffusers_flux2 \
+  --transformer-cache-repo-id wavetao2010/turboquant-dit-flux2-dev-cache \
+  --transformer-cache-variant flux2-dev-single-gpu \
+  --text-cache-repo-id wavetao2010/turboquant-dit-mistral3-cache \
+  --text-cache-variant mistral3-single-gpu \
+  --auto-download-cache \
   --output-dir ./outputs/diffusers_flux2 \
   --cpu-offload
 ```
@@ -98,6 +127,10 @@ Cases:
 | `transformer` | yes | no |
 | `text` | no | yes |
 | `both` | yes | yes |
+
+The transformer and text encoder caches live in separate Hub repos so their upstream model licenses
+remain easy to track. You can also omit the `--*-cache-repo-id` arguments and let the package build a
+local cache on first use.
 
 ## Official FLUX.2 Reference Pipeline Benchmark
 
@@ -195,14 +228,17 @@ and interpretation.
 
 Reference FLUX.2 experiments are documented in [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md). Current public results use the official FLUX.2 reference pipeline, text-to-image mode, single-GPU CPU/GPU offload, 512x512, 28 steps, seed 42, and cache-hit quantized states:
 
-| Case | Replaced Modules | Forward Latency | Forward Allocated Peak | Output |
-|---|---:|---:|---:|---|
-| baseline | 0 | 112.484s | 62834.5MB | [image](assets/flux2_t2i_single_gpu_512_28step/baseline.png) |
-| transformer quant | 128 | 112.947s | 46499.7MB | [image](assets/flux2_t2i_single_gpu_512_28step/transformer_quant.png) |
-| text encoder quant | 120 | 94.196s | 62834.4MB | [image](assets/flux2_t2i_single_gpu_512_28step/text_encoder_quant.png) |
-| transformer + text encoder quant | 248 | 93.938s | 38994.1MB | [image](assets/flux2_t2i_single_gpu_512_28step/transformer_text_quant.png) |
+| Case | Replaced Modules | Forward Latency | Forward Allocated Peak | Delta vs Baseline | PSNR vs Baseline | Output |
+|---|---:|---:|---:|---:|---:|---|
+| baseline | 0 | 112.484s | 62834.5MB | - | - | [image](assets/flux2_t2i_single_gpu_512_28step/baseline.png) |
+| transformer quant | 128 | 112.947s | 46499.7MB | -16334.8MB | 47.24dB | [image](assets/flux2_t2i_single_gpu_512_28step/transformer_quant.png) |
+| text encoder quant | 120 | 94.196s | 62834.4MB | -0.1MB | 45.25dB | [image](assets/flux2_t2i_single_gpu_512_28step/text_encoder_quant.png) |
+| transformer + text encoder quant | 248 | 93.938s | 38994.1MB | -23840.4MB | 45.94dB | [image](assets/flux2_t2i_single_gpu_512_28step/transformer_text_quant.png) |
 
 These numbers are workload-specific single-run measurements. The text-encoder-only case does not reduce the reported denoise forward peak because the unquantized transformer still dominates that metric; in the combined case, adding Mistral3 quantization on top of transformer quantization reduces forward allocated peak by another 7505.6MB in this run. The table is included to make the project reproducible and falsifiable, not to claim universal speedups.
+
+The image files and raw JSON metrics are committed under `assets/` so quality and memory claims are
+inspectable, not just described in prose.
 
 ## Status
 
